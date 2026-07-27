@@ -1,0 +1,1604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Stock Dashboard</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root{
+    --bg: #0e1117;
+    --panel: #161a24;
+    --panel-2: #1b202c;
+    --border: #262b38;
+    --text: #e4e6eb;
+    --text-dim: #838a9c;
+    --accent: #f0b429; /* Warm golden amber */
+    --accent-dim: rgba(240, 180, 41, 0.12);
+    --green: #2ecc9b;
+    --red: #f0546b;
+    --shadow: 0 4px 16px rgba(0,0,0,0.35);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; height:100%; background:var(--bg); color:var(--text);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased; }
+
+  ::selection { background: var(--accent-dim); color: var(--accent); }
+
+  @keyframes fadeSlideIn { from { opacity:0; transform: translateY(-4px); } to { opacity:1; transform: translateY(0); } }
+  @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+  @keyframes popIn { from { opacity:0; transform: scale(.96); } to { opacity:1; transform: scale(1); } }
+  @keyframes rowIn { from { opacity:0; transform: translateX(-6px); } to { opacity:1; transform: translateX(0); } }
+
+  .app { display:flex; height:100vh; width:100vw; overflow:hidden; }
+
+  /* ---------- Sidebar ---------- */
+  .sidebar { width: 280px; min-width:280px; background:var(--panel); border-right:1px solid var(--border);
+    display:flex; flex-direction:column; position:relative; z-index:5; }
+  .sidebar-header { padding:16px 16px 12px; border-bottom:1px solid var(--border); }
+  .sidebar-header h1 { font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--text-dim); margin:0 0 12px; }
+  .search-wrap { position:relative; }
+  #search { width:100%; background:var(--panel-2); border:1px solid var(--border); border-radius:8px;
+    color:var(--text); padding:8px 34px 8px 11px; font-size:13px; outline:none;
+    transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
+  #search:focus { border-color:var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); background:var(--panel); }
+  .search-icon { position:absolute; right:10px; top:50%; transform:translateY(-50%); width:14px; height:14px;
+    color:var(--text-dim); pointer-events:none; transition: color .15s ease; }
+  #search:focus ~ .search-icon { color:var(--accent); }
+  .search-suggestions { position:absolute; top: calc(100% + 6px); left:0; right:0; background:var(--panel-2);
+    border:1px solid var(--border); border-radius:10px; box-shadow: var(--shadow), 0 0 0 1px rgba(0,0,0,0.15);
+    max-height: 260px; overflow-y:auto; z-index:50; display:none;
+    animation: fadeSlideIn .16s ease; }
+  .search-suggestions.open { display:block; }
+  .suggestion-item { display:flex; justify-content:space-between; align-items:center; padding:9px 12px;
+    cursor:pointer; font-size:12.5px; transition: background .1s ease; border-bottom:1px solid rgba(255,255,255,0.03); }
+  .suggestion-item:last-child { border-bottom:none; }
+  .suggestion-item:hover, .suggestion-item.highlighted { background: var(--accent-dim); }
+  .suggestion-item .s-ticker { font-weight:700; color:var(--text); letter-spacing:.01em; }
+  .suggestion-item .s-ticker mark { background:transparent; color:var(--accent); font-weight:800; }
+  .suggestion-item .s-price { color:var(--text-dim); font-variant-numeric: tabular-nums; font-size:11.5px; }
+  .suggestion-empty { padding:12px; font-size:12px; color:var(--text-dim); text-align:center; }
+  #watchlist-select { width:100%; background:var(--panel-2); border:1px solid var(--border); border-radius:8px;
+    color:var(--text); padding:8px 11px; font-size:13px; outline:none; margin-bottom:9px; cursor:pointer;
+    transition: border-color .18s ease, box-shadow .18s ease, transform .08s ease; }
+  #watchlist-select:focus { border-color:var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  #watchlist-select:active { transform: scale(.99); }
+
+  /* ---------- Add Ticker ---------- */
+  .add-ticker-row { display:flex; gap:6px; margin-bottom:9px; }
+  #add-ticker-input { flex:1; min-width:0; background:var(--panel-2); border:1px solid var(--border);
+    border-radius:8px; color:var(--text); padding:8px 11px; font-size:13px; outline:none;
+    text-transform:uppercase; transition: border-color .12s, box-shadow .12s; }
+  #add-ticker-input:focus { border-color:var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  #add-ticker-input::placeholder { text-transform:none; }
+  #add-ticker-btn { flex-shrink:0; width:34px; background:var(--accent); color:#1a1300; border:none;
+    border-radius:8px; font-size:16px; font-weight:700; cursor:pointer; transition: filter .12s ease, transform .1s ease, box-shadow .12s ease; }
+  #add-ticker-btn:hover { filter: brightness(1.08); box-shadow: 0 2px 12px rgba(240,180,41,0.28); transform: translateY(-1px); }
+  #add-ticker-btn:active { transform: scale(0.93); }
+  #add-ticker-btn:disabled { opacity:.5; cursor:default; filter:none; box-shadow:none; transform:none; }
+  .add-ticker-status { font-size:11px; margin-bottom:2px; min-height:14px; transition: color .15s ease; animation: fadeIn .18s ease; }
+  .add-ticker-status.error { color:var(--red); }
+  .add-ticker-status.success { color:var(--green); }
+  .add-ticker-status.loading { color:var(--text-dim); }
+
+  .symbol-list { flex:1; overflow-y:auto; }
+  .symbol-row { display:flex; justify-content:space-between; align-items:center; padding:11px 10px 11px 16px;
+    cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.03); gap:8px;
+    transition: background .16s ease, padding-left .16s ease, border-left-color .16s ease, transform .12s ease;
+    animation: rowIn .22s ease backwards; }
+  .symbol-row:hover { background: rgba(255,255,255,0.045); transform: translateX(1px); }
+  .symbol-row:hover .remove-btn { opacity:1; transform: scale(1); }
+  .symbol-row.active { background: var(--accent-dim); border-left:3px solid var(--accent); padding-left:13px; }
+  .symbol-row .left { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .symbol-row .ticker { font-weight:600; font-size:13.5px; color:var(--text); letter-spacing:.01em; }
+  .symbol-row .meta { font-size:11px; color:var(--text-dim); }
+  .symbol-row .right { text-align:right; display:flex; flex-direction:column; gap:2px; }
+  .symbol-row .price { font-size:13px; color:var(--text); font-variant-numeric: tabular-nums; transition: color .3s ease; }
+  .symbol-row .chg { font-size:11.5px; font-weight:600; font-variant-numeric: tabular-nums; transition: color .3s ease; }
+  .chg.up { color:var(--green); }
+  .chg.down { color:var(--red); }
+  .chg.flat { color:var(--text-dim); }
+  .remove-btn { flex-shrink:0; width:20px; height:20px; border-radius:50%; border:none;
+    background: rgba(255,255,255,0.06); color:var(--text-dim); font-size:12px; line-height:1;
+    cursor:pointer; opacity:0; transform: scale(.8); transition: opacity .14s ease, background .14s ease, color .14s ease, transform .14s ease;
+    display:flex; align-items:center; justify-content:center; }
+  .remove-btn:hover { background: rgba(240, 84, 107, 0.18); color:var(--red); transform: scale(1.12); }
+  .remove-btn:active { transform: scale(.9); }
+
+  /* ---------- Main ---------- */
+  .main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .topbar { height:56px; min-height:56px; display:flex; align-items:center; justify-content:space-between;
+    padding:0 20px; border-bottom:1px solid var(--border); background:var(--panel); }
+  .topbar-left { display:flex; align-items:center; gap:18px; }
+  .symbol-title { font-size:17px; font-weight:700; letter-spacing:.01em; transition: opacity .18s ease; animation: fadeIn .25s ease; }
+  .symbol-title .sub { font-size:12px; color:var(--text-dim); font-weight:400; margin-left:8px; }
+  .legend { display:flex; gap:14px; font-size:12.5px; color:var(--text-dim); animation: fadeIn .2s ease; }
+  .legend b { color:var(--text); font-weight:600; transition: color .15s ease; }
+  .legend .lv { margin-right:4px; }
+
+  /* ---------- Wave Controls ---------- */
+  .wave-controls { display:flex; align-items:center; gap:16px; font-size:13px; color:var(--text-dim); }
+  .wave-controls label { display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; }
+  .wave-controls input[type="checkbox"] { accent-color: var(--accent); cursor:pointer; }
+  .wave-controls .slider-container { display:flex; align-items:center; gap:8px; }
+  .wave-controls input[type="range"] { accent-color: var(--accent); cursor:pointer; height:4px; width:80px; transition: filter .15s ease; }
+  .wave-controls input[type="range"]:hover { filter: brightness(1.15); }
+  #depth-val { transition: color .15s ease; }
+
+  .chart-container { position:relative; flex:1; min-height:0; }
+  #chart { position:absolute; inset:0; opacity:0; transition: opacity .35s ease; }
+  #chart.loaded { opacity:1; }
+
+  .empty-state, .status-state { position:absolute; inset:0; display:flex; align-items:center;
+    justify-content:center; color:var(--text-dim); font-size:14px; flex-direction:column; gap:10px;
+    animation: fadeIn .25s ease; }
+  .status-state { display:none; }
+  .status-state .dot-spinner { display:inline-flex; gap:5px; }
+  .status-state .dot-spinner span { width:7px; height:7px; border-radius:50%; background:var(--accent);
+    animation: dotPulse 1s ease-in-out infinite; }
+  .status-state .dot-spinner span:nth-child(2) { animation-delay: .15s; }
+  .status-state .dot-spinner span:nth-child(3) { animation-delay: .3s; }
+  @keyframes dotPulse { 0%, 80%, 100% { opacity:.25; transform: scale(.7); } 40% { opacity:1; transform: scale(1); } }
+
+  /* scrollbar */
+  .symbol-list::-webkit-scrollbar { width:8px; }
+  .symbol-list::-webkit-scrollbar-thumb { background:#333a4a; border-radius:4px; }
+
+  /* ---------- Sidebar Tabs ---------- */
+  .sidebar-tabs { display:flex; gap:4px; margin-top:10px; background:var(--bg);
+    border:1px solid var(--border); border-radius:6px; padding:3px; }
+  .tab-btn { flex:1; background:transparent; border:none; color:var(--text-dim);
+    font-size:12px; font-weight:600; letter-spacing:.03em; padding:6px 0; border-radius:4px;
+    cursor:pointer; transition: background .16s ease, color .16s ease, transform .08s ease; }
+  .tab-btn:hover { color:var(--text); }
+  .tab-btn:active { transform: scale(.96); }
+  .tab-btn.active { background: rgba(255,179,0,0.12); color:var(--accent); }
+
+  .sidebar-panel { display:none; flex:1; min-height:0; flex-direction:column; }
+  .sidebar-panel.active { display:flex; animation: fadeIn .18s ease; }
+
+  /* ---------- Screener ---------- */
+  .screener-header { padding:14px; border-bottom:1px solid var(--border); }
+  .screener-header .lookback { font-size:11px; color:var(--text-dim); margin:0 0 10px; }
+  #run-screener-btn { width:100%; background: var(--accent); color:#1a1300; border:none;
+    border-radius:8px; padding:10px 0; font-size:12.5px; font-weight:700; letter-spacing:.03em;
+    cursor:pointer; transition: filter .12s ease, transform .1s ease, box-shadow .15s ease; box-shadow: 0 2px 10px rgba(240,180,41,0.2); }
+  #run-screener-btn:hover { filter: brightness(1.08); box-shadow: 0 4px 16px rgba(240,180,41,0.32); transform: translateY(-1px); }
+  #run-screener-btn:active { transform: scale(0.98); }
+  #run-screener-btn:disabled { opacity:.55; cursor:default; filter:none; transform:none; }
+  .screener-status { font-size:11.5px; color:var(--text-dim); margin-top:8px; min-height:14px; transition: color .15s ease; }
+
+  .screener-results { flex:1; overflow-y:auto; }
+  .sensi-group { border-bottom:1px solid var(--border); animation: fadeIn .2s ease; }
+  .sensi-group-header { display:flex; align-items:center; justify-content:space-between;
+    padding:9px 14px; background: rgba(255,255,255,0.02); position:sticky; top:0; }
+  .sensi-group-header .label { font-size:11.5px; font-weight:700; letter-spacing:.05em;
+    color:var(--accent); text-transform:uppercase; }
+  .sensi-group-header .count { font-size:10.5px; color:var(--text-dim); background:var(--bg);
+    border:1px solid var(--border); border-radius:10px; padding:1px 7px; transition: background .15s ease, color .15s ease; }
+  .sensi-group-empty { padding:8px 14px 12px; font-size:11.5px; color:var(--text-dim); font-style:italic; }
+  .screener-row { display:flex; justify-content:space-between; align-items:center; padding:7px 14px 7px 22px;
+    cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.03);
+    transition: background .14s ease, padding-left .14s ease, border-left-color .14s ease;
+    animation: rowIn .2s ease backwards; }
+  .screener-row:hover { background: rgba(255,255,255,0.04); }
+  .screener-row.active { background: rgba(255, 179, 0, 0.1); border-left:3px solid var(--accent); padding-left:19px; }
+  .screener-row .ticker { font-size:12.5px; font-weight:600; color:var(--text); }
+  .screener-row .price { font-size:11.5px; color:var(--text-dim); }
+  .spinner { display:inline-block; width:11px; height:11px; border:2px solid rgba(255,179,0,0.25);
+    border-top-color: var(--accent); border-radius:50%; animation: spin .7s linear infinite; margin-right:6px; vertical-align:-1px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1>Watchlist</h1>
+        <select id="watchlist-select">
+          <option value="Watchlist1">Watchlist1</option>
+          <option value="Nasdaq300">Nasdaq300</option>
+        </select>
+        <div class="add-ticker-row">
+          <input id="add-ticker-input" placeholder="Add ticker e.g. AAPL" autocomplete="off" maxlength="10" />
+          <button id="add-ticker-btn" title="Add to watchlist">+</button>
+        </div>
+        <div class="add-ticker-status" id="add-ticker-status"></div>
+        <div class="search-wrap">
+          <input id="search" placeholder="Search symbol..." autocomplete="off" />
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <div class="search-suggestions" id="search-suggestions"></div>
+        </div>
+        <div class="sidebar-tabs">
+          <button class="tab-btn active" id="tab-btn-watchlist" data-tab="watchlist">Watchlist</button>
+          <button class="tab-btn" id="tab-btn-screener" data-tab="screener">Screener</button>
+        </div>
+      </div>
+
+      <div id="watchlist-panel" class="sidebar-panel active">
+        <div id="symbol-list" class="symbol-list"></div>
+      </div>
+
+      <div id="screener-panel" class="sidebar-panel">
+        <div class="screener-header">
+          <p class="lookback">Scans every symbol for a VCP formed in the last <b id="screener-lookback-label">5</b> months, across sensitivities <b> 8, 11, 15</b>. Tickers already extended more than 15% above resistance are excluded.</p>
+          <button id="run-screener-btn">Run Scan</button>
+          <div class="screener-status" id="screener-status"></div>
+        </div>
+        <div id="screener-results" class="screener-results"></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="topbar-left">
+          <div class="symbol-title" id="symbol-title">Select a stock</div>
+          <div class="legend" id="legend"></div>
+        </div>
+        <div class="wave-controls">
+          <label>
+            <input type="checkbox" id="toggle-waves" checked />
+            <span>Show Waves</span>
+          </label>
+          <div class="slider-container">
+            <span>Sensitivity:</span>
+            <input type="range" id="wave-depth" min="1" max="15" value="1" />
+            <span id="depth-val" style="min-width:15px; display:inline-block; text-align:right;">1</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-container">
+        <div id="chart"></div>
+        <div class="empty-state" id="empty-state">Select a symbol from the watchlist to view its chart</div>
+        <div class="status-state" id="status-state">Loading...</div>
+      </div>
+    </main>
+  </div>
+
+<script>
+let chart = null;
+let candleSeries = null;
+let volumeSeries = null;
+let activeWaveSeriesList = []; 
+let allSymbols = [];
+let activeSymbol = null;
+let selectedWatchlist = 'Watchlist1';
+let rawCandles = [];
+let waveDebounceTimeout = null;
+
+// =====================================================================
+// VCP CONFIGURATION — Change these values to customize behavior
+// =====================================================================
+
+// How far back to look for VCPs (in months). Change this single value:
+//   1  = last 1 month
+//   3  = last 3 months
+//   6  = last 6 months
+//   12 = last 1 year  (default)
+//   24 = last 2 years
+//   36 = last 3 years
+const VCP_LOOKBACK_MONTHS = 5   ;
+
+// If the 1st high is more than this % above the 2nd high, the
+// resistance bar snaps to slightly above the 2nd high instead so
+// the box stays compact and everything fits on screen.
+// Now a range: every value is tried and results are merged + deduplicated.
+const RESISTANCE_HIGH_DIFF_PCT_RANGE = [0.05, 0.10, 0.15];
+
+// After 2 waves are found at the chosen sensitivity, later waves in a real
+// VCP often get much tighter/smaller than that sensitivity can detect. Once
+// a run has 2 waves, subsequent waves are searched for using this finer
+// (smaller) pivot depth instead, so small 3rd/4th+ waves aren't missed.
+// Now a range: every value is tried and results are merged + deduplicated.
+const SMALL_WAVE_DEPTH_RANGE = [1, 2, 3];
+
+// A wave's peak (its pEnd) must climb back up to within this % of the
+// resistance level to count as a genuine contraction. If a wave's peak
+// falls well short of resistance, the pattern is not contracting toward
+// a breakout point and the run is invalid — it gets discarded.
+// Now a range: every value is tried and results are merged + deduplicated.
+const VCP_RESISTANCE_APPROACH_PCT_RANGE = [0.03, 0.05, 0.07];
+
+// Back-compat single defaults (first value of each range) used when a
+// function is called without explicit parameter overrides.
+const RESISTANCE_HIGH_DIFF_PCT = RESISTANCE_HIGH_DIFF_PCT_RANGE[0];
+const SMALL_WAVE_DEPTH = SMALL_WAVE_DEPTH_RANGE[0];
+const VCP_RESISTANCE_APPROACH_PCT = VCP_RESISTANCE_APPROACH_PCT_RANGE[0];
+
+// A candle closing above resistance doesn't automatically mean the VCP is
+// over — real patterns often "shake out" with a brief poke above
+// resistance that gets rejected, pulls back, and forms one more (often
+// tighter) contraction wave before the real breakout. Only a close that
+// goes this far above resistance is treated as a genuine, run-ending
+// breakout; anything closing above resistance but still within this
+// tolerance is allowed to keep contracting.
+const VCP_BREAKOUT_KILL_PCT = 0.15;
+
+// =====================================================================
+// SCREENER CONFIGURATION
+// =====================================================================
+// Sensitivities (wave-depth values) the screener scans, in this order.
+const SCREENER_SENSITIVITIES = [8, 11, 15];
+// Only count a VCP if its first wave started within this many months ago.
+const SCREENER_LOOKBACK_MONTHS = 5;
+// How many symbols to fetch/scan concurrently.
+const SCREENER_CONCURRENCY = 6;
+// Discard a VCP match if price has already run up more than this % above
+// its resistance level — we only want tickers still near the breakout,
+// not ones that already broke out and extended.
+const SCREENER_MAX_BREAKOUT_PCT = 0.15;
+
+function initChart() {
+  const container = document.getElementById('chart');
+  chart = LightweightCharts.createChart(container, {
+    layout: {
+      background: { type: 'solid', color: 'transparent' },
+      textColor: '#d1d4dc',
+    },
+    grid: {
+      vertLines: { visible: false },
+      horzLines: { visible: false },
+    },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#2a2e39' },
+    timeScale: { borderColor: '#2a2e39', timeVisible: false },
+  });
+
+  candleSeries = chart.addCandlestickSeries({
+    upColor: '#26a69a', downColor: '#ef5350',
+    borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+    wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+  });
+
+  volumeSeries = chart.addHistogramSeries({
+    priceFormat: { type: 'volume' },
+    priceScaleId: '',
+  });
+  volumeSeries.priceScale().applyOptions({
+    scaleMargins: { top: 0.8, bottom: 0 },
+  });
+
+  chart.subscribeCrosshairMove(updateLegend);
+
+  new ResizeObserver(() => {
+    chart.applyOptions({
+      width: container.clientWidth,
+      height: container.clientHeight,
+    });
+  }).observe(container);
+}
+
+function updateLegend(param) {
+  const legend = document.getElementById('legend');
+  if (!activeSymbol) { legend.innerHTML = ''; return; }
+
+  let bar = null;
+  if (param && param.time) {
+    bar = param.seriesData.get(candleSeries);
+  }
+  if (!bar && rawCandles.length) {
+    bar = rawCandles[rawCandles.length - 1];
+  }
+  if (!bar) { legend.innerHTML = ''; return; }
+
+  const color = bar.close >= bar.open ? 'var(--green)' : 'var(--red)';
+  legend.innerHTML = `
+    <span class="lv">O <b style="color:${color}">${bar.open.toFixed(2)}</b></span>
+    <span class="lv">H <b style="color:${color}">${bar.high.toFixed(2)}</b></span>
+    <span class="lv">L <b style="color:${color}">${bar.low.toFixed(2)}</b></span>
+    <span class="lv">C <b style="color:${color}">${bar.close.toFixed(2)}</b></span>
+  `;
+}
+
+// Cosine ease interpolation: calculates smooth, curving transitions at end nodes
+function easeInterp(a, b, t) {
+  const eased = (1 - Math.cos(t * Math.PI)) / 2;
+  return a + (b - a) * eased;
+}
+
+/**
+ * Stitches consecutive qualifying waves in a VCP run into a single unbroken dataset
+ * so they connect seamlessly at shared peak pivots.
+ */
+function buildConnectedRun(run, candles) {
+  const combinedData = [];
+
+  for (let r = 0; r < run.length; r++) {
+    const w = run[r];
+    const { pStart, pMid, pEnd, legLeft, legRight } = w;
+
+    // Start of the segment: first wave starts at pStart.index; subsequent waves
+    // start at index + 1 to prevent data duplication at the shared peak.
+    const startIdx = (r === 0) ? pStart.index : pStart.index + 1;
+    const endIdx = pEnd.index;
+
+    // Left Leg Downward Curve
+    for (let i = startIdx; i <= pMid.index; i++) {
+      const t = (i - pStart.index) / (legLeft || 1);
+      combinedData.push({
+        time: candles[i].time,
+        value: easeInterp(pStart.value, pMid.value, t)
+      });
+    }
+
+    // Right Leg Upward Curve
+    for (let i = pMid.index + 1; i <= endIdx; i++) {
+      const t = (i - pMid.index) / (legRight || 1);
+      combinedData.push({
+        time: candles[i].time,
+        value: easeInterp(pMid.value, pEnd.value, t)
+      });
+    }
+  }
+
+  return combinedData;
+}
+
+/**
+ * Detects extreme highs/lows in candles (using the given pivot depth) and
+ * builds candidate contraction waves (pStart -> pMid -> pEnd) from them.
+ * `fromIndex` restricts detection to pivots at or after that candle index,
+ * which lets later waves be re-scanned at a different sensitivity without
+ * re-walking the whole series.
+ */
+function buildCandidates(candles, depth, fromIndex) {
+  fromIndex = fromIndex || 0;
+
+  // --- Step 1: Detect pivot extreme highs and lows ---
+  const points = [];
+  for (let i = Math.max(depth, fromIndex); i < candles.length - depth; i++) {
+    const cur = candles[i];
+    let isHigh = true, isLow = true;
+    for (let j = 1; j <= depth; j++) {
+      if (candles[i - j].high >= cur.high || candles[i + j].high > cur.high) isHigh = false;
+      if (candles[i - j].low  <= cur.low  || candles[i + j].low  < cur.low ) isLow  = false;
+    }
+    if (isHigh) points.push({ index: i, type: 'H', value: cur.high, time: cur.time });
+    else if (isLow) points.push({ index: i, type: 'L', value: cur.low,  time: cur.time });
+  }
+  if (points.length === 0) return [];
+
+  // --- Step 2: Resolve successive identical extreme points ---
+  const alt = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    const prev = alt[alt.length - 1], curr = points[i];
+    if (curr.type === prev.type) {
+      if ((curr.type === 'H' && curr.value > prev.value) ||
+          (curr.type === 'L' && curr.value < prev.value)) {
+        alt[alt.length - 1] = curr;
+      }
+    } else {
+      alt.push(curr);
+    }
+  }
+
+  // --- Step 3: Align path to start on High (H) for U-curves ---
+  const seq = alt[0].type === 'L' ? alt.slice(1) : alt;
+
+  // --- Step 4: Build candidate waves with drop percentages ---
+  const candidates = [];
+  for (let k = 0; k + 2 < seq.length; k += 2) {
+    const pStart   = seq[k];
+    const pMid     = seq[k + 1];  // Valley dip (Low pivot)
+    const pEnd     = seq[k + 2];
+    const legLeft  = pMid.index - pStart.index;
+    const legRight = pEnd.index  - pMid.index;
+    if (legLeft < 1 || legRight < 1) continue;
+
+    const dropPct = (pStart.value - pMid.value) / pStart.value * 100;
+    candidates.push({ pStart, pMid, pEnd, legLeft, legRight, dropPct, low: pMid.value });
+  }
+  return candidates;
+}
+
+/**
+ * Identifies extreme highs/lows and builds connected VCP contracting waves.
+ * Filters for chains of curves where the lows are sequentially rising
+ * (or equal when rounded to integer) and the drawdown percentage contracts.
+ */
+function calculateWaveSegments(candles, depth, smallWaveDepth, resistanceApproachPct) {
+  smallWaveDepth = (smallWaveDepth === undefined) ? SMALL_WAVE_DEPTH : smallWaveDepth;
+  resistanceApproachPct = (resistanceApproachPct === undefined) ? VCP_RESISTANCE_APPROACH_PCT : resistanceApproachPct;
+
+  const MIN_WAVES = 2; // Minimum sequential waves required to draw a VCP run
+  if (!candles || candles.length < depth * 2 + 1) return [];
+
+  const candidates = buildCandidates(candles, depth, 0);
+  if (candidates.length === 0) return [];
+
+  // --- Step 5: Scan for sequential runs of VCP contracting waves ---
+  // A VCP run continues until a candle CLOSES above the resistance level
+  // (2nd wave high + 0.3 %).  Once 2+ waves exist the resistance is known;
+  // before that the highest-peak check is used as a fallback.
+  const runsData = [];
+  let i = 0;
+  while (i < candidates.length) {
+    const run = [candidates[i]];
+    let j = i + 1;
+    let breakoutIdx = -1; // index of the candle that closes above resistance
+    // Candidates currently being scanned for the next wave. Starts out as
+    // the main-sensitivity list; once 2 waves exist and that list runs dry,
+    // we switch to a finer-sensitivity list to pick up smaller later waves
+    // (real VCPs often tighten so much that the chosen sensitivity misses
+    // the 3rd/4th wave entirely).
+    let activeCandidates = candidates;
+
+    while (true) {
+      if (j >= activeCandidates.length) {
+        if (run.length >= 2 && activeCandidates === candidates) {
+          const lastEndIdx = run[run.length - 1].pEnd.index;
+          const finer = buildCandidates(candles, smallWaveDepth, lastEndIdx)
+            .filter(c => c.pStart.index >= lastEndIdx);
+          if (finer.length > 0) {
+            activeCandidates = finer;
+            j = 0;
+            continue;
+          }
+        }
+        break; // nothing left to scan at any sensitivity
+      }
+
+      const prev = run[run.length - 1];
+      const curr = activeCandidates[j];
+
+      // --- Break check: resistance level once we have 2+ waves ---
+      let breakLevel = Infinity;
+      if (run.length >= 2) {
+        breakLevel = getResistanceLevel(run);
+      } else {
+        // Fallback before 2nd wave: use highest peak so far
+        breakLevel = run[0].pStart.value;
+      }
+
+      let broken = false;
+      // A brief close above resistance (a "shakeout") doesn't necessarily
+      // end the pattern — only a close that clears resistance by more than
+      // VCP_BREAKOUT_KILL_PCT counts as a genuine, run-ending breakout.
+      const killLevel = breakLevel === Infinity ? Infinity : breakLevel * (1 + VCP_BREAKOUT_KILL_PCT);
+      for (let k = prev.pEnd.index; k <= curr.pStart.index; k++) {
+        if (candles[k].close > killLevel) {
+          broken = true;
+          breakoutIdx = k;
+          break;
+        }
+      }
+
+      // --- APPROACH-TO-RESISTANCE RULE ---
+      // curr's peak (pEnd) must recover back up to within
+      // VCP_RESISTANCE_APPROACH_PCT of the resistance level. If the peak
+      // falls well short, this is not a real contraction wave.
+      const approachAllowedGap = breakLevel * resistanceApproachPct;
+      const approachGap = breakLevel - curr.pEnd.value;
+      const validApproach = breakLevel === Infinity ? true : (approachGap <= approachAllowedGap);
+
+      // --- LOW RULE ---
+      // Each new wave's low must be equal to or higher than the previous
+      // wave's low. Any deeper low disqualifies the candidate.
+      const validLow = curr.low >= prev.low;
+
+      if (!validLow) {
+  break; // hard terminate: lower low means this VCP is invalid
+}
+
+if (broken || !validApproach) {
+  // Only non-low failures are allowed to try a finer wave depth.
+  if (run.length >= 2 && activeCandidates === candidates) {
+    const lastEndIdx = prev.pEnd.index;
+    const finer = buildCandidates(candles, smallWaveDepth, lastEndIdx)
+      .filter(c => c.pStart.index >= lastEndIdx);
+
+    if (finer.length > 0) {
+      activeCandidates = finer;
+      j = 0;
+      breakoutIdx = -1;
+      continue;
+    }
+  }
+
+  if (!broken && activeCandidates !== candidates && j + 1 < activeCandidates.length) {
+    j++;
+    continue;
+  }
+
+  break;
+}
+
+      run.push(curr);
+      j++;
+    }
+
+    // --- Post-wave breakout scan ---
+    // If no break was found between waves, check candles AFTER the last wave
+    if (breakoutIdx === -1 && run.length >= 2) {
+      const resistance = getResistanceLevel(run);
+      const killLevel = resistance * (1 + VCP_BREAKOUT_KILL_PCT);
+      const lastEndIdx = run[run.length - 1].pEnd.index;
+      for (let k = lastEndIdx + 1; k < candles.length; k++) {
+        if (candles[k].close > killLevel) {
+          breakoutIdx = k;
+          break;
+        }
+      }
+    }
+
+    // Connect and record only those segments forming a valid VCP run
+    if (run.length >= MIN_WAVES) {
+      const combinedData = buildConnectedRun(run, candles);
+      runsData.push({ data: combinedData, run: run, breakoutIdx: breakoutIdx });
+    }
+    // If we switched to the finer candidate list, `j` indexes into that list,
+    // not `candidates` — so resume the outer scan from the next main-list wave.
+    i = (activeCandidates === candidates && j > i + 1) ? j : i + 1;
+  }
+
+  return mergeAdjacentRuns(runsData, candles);
+}
+
+/**
+ * Builds every combination of (resistanceHighDiffPct, smallWaveDepth,
+ * resistanceApproachPct) from the configured ranges above.
+ */
+function buildParamCombinations() {
+  const combos = [];
+  RESISTANCE_HIGH_DIFF_PCT_RANGE.forEach(resistanceHighDiffPct => {
+    SMALL_WAVE_DEPTH_RANGE.forEach(smallWaveDepth => {
+      VCP_RESISTANCE_APPROACH_PCT_RANGE.forEach(resistanceApproachPct => {
+        combos.push({ resistanceHighDiffPct, smallWaveDepth, resistanceApproachPct });
+      });
+    });
+  });
+  return combos;
+}
+
+/**
+ * Builds a stable identity key for a VCP run so the same pattern detected
+ * under different parameter combinations can be recognized as a duplicate.
+ * Keyed on the run's start/end times, wave count, and rounded resistance
+ * level — different parameter combos that land on the same underlying
+ * pattern will produce (near-)identical keys.
+ */
+function runIdentityKey(run) {
+  const start = run[0].pStart.time;
+  const end = run[run.length - 1].pEnd.time;
+  const resistance = getResistanceLevel(run);
+  const roundedResistance = Math.round(resistance * 100) / 100;
+  return `${start}|${end}|${run.length}|${roundedResistance}`;
+}
+
+/**
+ * Runs VCP detection across every configured parameter combination for the
+ * given pivot depth (sensitivity), merges all detected runs into a single
+ * array, and removes duplicates (the same VCP pattern found by more than
+ * one parameter combination) so each VCP appears only once.
+ */
+function calculateWaveSegmentsMultiParam(candles, depth) {
+  const combos = buildParamCombinations();
+  const seen = new Map();
+
+  combos.forEach(({ smallWaveDepth, resistanceApproachPct }) => {
+    const runsData = calculateWaveSegments(candles, depth, smallWaveDepth, resistanceApproachPct);
+    runsData.forEach(entry => {
+      const key = runIdentityKey(entry.run);
+      if (!seen.has(key)) {
+        seen.set(key, entry);
+      }
+    });
+  });
+
+  const deduped = Array.from(seen.values());
+  deduped.sort((a, b) => new Date(a.run[0].pStart.time) - new Date(b.run[0].pStart.time));
+  return deduped;
+}
+
+// Maximum gap (in bars) allowed between the end of one run and the start of
+// the next for them to be considered a continuation of the same VCP rather
+// than a fresh, unrelated pattern. The kill-level breakout that splits a
+// run can itself take many bars to resolve (price can drift for weeks
+// before the next pivot is detected), so this needs to be generous rather
+// than a tight few-bar window.
+const REATTACH_MAX_GAP_BARS = 40;
+// How far above the previous run's resistance the next run's first wave is
+// still allowed to start and still count as "the same base" rather than a
+// clean breakout that has moved on to a new range. Expressed as an extra
+// buffer on top of VCP_RESISTANCE_APPROACH_PCT.
+const REATTACH_PRICE_BUFFER_PCT = 0.08;
+
+/**
+ * A run gets hard-terminated the moment a candle *closes* more than
+ * VCP_BREAKOUT_KILL_PCT above resistance — but that close isn't always a
+ * genuine, final breakout. Often it's just the peak of the VCP's next
+ * contraction wave, which the algorithm re-detects as a brand-new run
+ * starting moments later. When that next run begins right where the
+ * previous one ended and its first wave tops out close to the previous
+ * run's own resistance level (rather than escaping far above it), the two
+ * are stitched back together into a single continuous VCP instead of being
+ * drawn as two separate, disconnected boxes.
+ */
+function mergeAdjacentRuns(runsData, candles) {
+  if (runsData.length < 2) return runsData;
+
+  const merged = [runsData[0]];
+  for (let i = 1; i < runsData.length; i++) {
+    const prevEntry = merged[merged.length - 1];
+    const currEntry = runsData[i];
+    const prevRun = prevEntry.run;
+    const currRun = currEntry.run;
+
+    const prevLastEndIdx = prevRun[prevRun.length - 1].pEnd.index;
+    const currFirstStartIdx = currRun[0].pStart.index;
+    const gap = currFirstStartIdx - prevLastEndIdx;
+
+    const prevResistance = getResistanceLevel(prevRun);
+    const currFirstHigh = currRun[0].pStart.value;
+    const priceTolerance = 1 + VCP_RESISTANCE_APPROACH_PCT + REATTACH_PRICE_BUFFER_PCT;
+
+    const startsSoonAfter = gap >= 0 && gap <= REATTACH_MAX_GAP_BARS;
+    const staysNearOldResistance = currFirstHigh <= prevResistance * priceTolerance;
+
+    if (window.VCP_DEBUG) {
+      console.log('[merge check]', {
+        prevEnd: prevRun[prevRun.length - 1].pEnd.time,
+        currStart: currRun[0].pStart.time,
+        gap, gapLimit: REATTACH_MAX_GAP_BARS, startsSoonAfter,
+        prevResistance, currFirstHigh,
+        priceTolerance, staysNearOldResistance,
+        willMerge: startsSoonAfter && staysNearOldResistance
+      });
+    }
+
+    if (startsSoonAfter && staysNearOldResistance) {
+      const mergedRun = prevRun.concat(currRun);
+      merged[merged.length - 1] = {
+        data: buildConnectedRun(mergedRun, candles),
+        run: mergedRun,
+        breakoutIdx: currEntry.breakoutIdx, // the later run's breakout now governs the merged one
+      };
+    } else {
+      merged.push(currEntry);
+    }
+  }
+  return merged;
+}
+
+/**
+ * Removes nested/overlapping duplicate VCP runs.
+ * If two runs cover almost the same time window and their resistance levels
+ * are very close, keep the stronger one (more waves, then longer span).
+ */
+function pruneDuplicateRuns(runs) {
+  if (runs.length < 2) return runs;
+
+  const spanOf = (run) => {
+    const start = new Date(run[0].pStart.time).getTime();
+    const end = new Date(run[run.length - 1].pEnd.time).getTime();
+    return { start, end, span: Math.max(0, end - start) };
+  };
+
+  const resistanceOf = (run) => getResistanceLevel(run);
+
+  const sorted = [...runs].sort((a, b) => {
+    const sa = spanOf(a.run);
+    const sb = spanOf(b.run);
+    if (sb.span !== sa.span) return sb.span - sa.span;
+    if (b.run.length !== a.run.length) return b.run.length - a.run.length;
+    return sa.start - sb.start;
+  });
+
+  const kept = [];
+
+  for (const entry of sorted) {
+    const currSpan = spanOf(entry.run);
+    const currRes = resistanceOf(entry.run);
+
+    let duplicate = false;
+
+    for (const keptEntry of kept) {
+      const keptSpan = spanOf(keptEntry.run);
+      const keptRes = resistanceOf(keptEntry.run);
+
+      const overlap = Math.min(currSpan.end, keptSpan.end) - Math.max(currSpan.start, keptSpan.start);
+      if (overlap <= 0) continue;
+
+      const overlapRatio = overlap / Math.min(currSpan.span || 1, keptSpan.span || 1);
+      const resDiff = Math.abs(currRes - keptRes) / Math.max(currRes, keptRes, 1);
+
+      const nested = overlapRatio >= 0.7 && resDiff <= 0.08;
+      const insideKept =
+        currSpan.start >= keptSpan.start &&
+        currSpan.end <= keptSpan.end &&
+        resDiff <= 0.08;
+
+      if (nested || insideKept) {
+        duplicate = true;
+        break;
+      }
+    }
+
+    if (!duplicate) kept.push(entry);
+  }
+
+  return kept.sort((a, b) => new Date(a.run[0].pStart.time) - new Date(b.run[0].pStart.time));
+}
+
+/**
+ * Keeps only the most relevant VCP runs for display.
+ * This avoids drawing two boxes on top of each other when one detected run
+ * is just a smaller nested wave inside a larger base.
+ */
+function keepBestRuns(runs) {
+  return pruneDuplicateRuns(runs);
+}
+
+// Keeps only VCP runs whose first wave (pStart) started within the last
+// `months` months (measured from today's real-world date).
+function filterRunsByLookback(runs, months) {
+  const now          = new Date();
+  const lookbackDate = new Date(now.getFullYear(), now.getMonth() - months, now.getDate());
+  return runs.filter(({ run }) => new Date(run[0].pStart.time) >= lookbackDate);
+}
+
+function clearWaves() {
+  activeWaveSeriesList.forEach(series => {
+    try {
+      chart.removeSeries(series);
+    } catch (e) {}
+  });
+  activeWaveSeriesList = [];
+}
+
+const WAVE_PIXEL_OFFSET = 6; // shift wave line this many pixels below the candles
+
+function shiftValueDownByPixels(value, pixels) {
+  const coord = candleSeries.priceToCoordinate(value);
+  if (coord === null) return value;
+  const shiftedPrice = candleSeries.coordinateToPrice(coord + pixels);
+  return shiftedPrice !== null ? shiftedPrice : value;
+}
+
+/**
+ * Determine the actual resistance level for a run — used for breakout
+ * detection, duplicate-run comparison, the screener's missed-entry check,
+ * AND the visual resistance bar placement. Based on the average of all
+ * wave highs in the run (so it sits at the center of the base) plus a
+ * small 0.3% buffer.
+ */
+function getResistanceLevel(run) {
+  if (!run || run.length === 0) return null;
+  const highs = run.map(w => w.pStart.value);
+  const avgHigh = highs.reduce((sum, h) => sum + h, 0) / highs.length;
+  return avgHigh * 1.003; // 0.3% above the average high
+}
+
+// Kept as an alias so existing references to the bar-placement helper
+// still work — both now resolve to the same actual resistance level.
+function getResistanceBarLevel(run) {
+  return getResistanceLevel(run);
+}
+
+// How far above the run's ORIGINAL resistance (see getOriginalResistance)
+// a VCP is still allowed to sit and count as a live setup for the
+// screener. A VCP must end inside its own box, or at most this tolerance
+// above the resistance bar — anything that closes further above than this
+// is treated as a genuine breakout and the ticker is dropped from the
+// screener tab.
+const SCREENER_POST_RUN_BREAKOUT_PCT = 0.01;
+
+/**
+ * Resistance level anchored to a run's ORIGINAL box — i.e. only its first
+ * two waves — rather than the full (possibly merged/extended) run.
+ *
+ * getResistanceLevel() averages the pStart high of every wave in the run.
+ * That's fine for drawing the box on the chart, but it means a run that
+ * has been stitched together (via mergeAdjacentRuns) out of several
+ * successive breakout-and-reconsolidate segments will have its resistance
+ * "average" quietly drift upward as each new, higher segment is folded
+ * in — so a ticker that has clearly broken out and run far above its
+ * original box can still look like it's sitting right at "resistance"
+ * relative to its own inflated average. For the screener we want the
+ * resistance bar as originally established by the pattern, so later waves
+ * can only be judged against it, not redefine it.
+ */
+function getOriginalResistance(run) {
+  return getResistanceLevel(run.slice(0, Math.min(2, run.length)));
+}
+
+/**
+ * Screener-only validity check for a completed run. Flags the run as
+ * "entry missed" (and therefore excluded from the screener) if:
+ *   1. Price has made a new low below the run's own lowest low anywhere
+ *      across the pattern's span (structure broke down), or
+ *   2. The MOST RECENT close is more than SCREENER_POST_RUN_BREAKOUT_PCT
+ *      above the run's ORIGINAL resistance level.
+ *
+ * Note this deliberately looks at where price stands RIGHT NOW, not
+ * whether any individual wave's peak poked above resistance along the
+ * way. A VCP's waves often spike above the resistance line mid-pattern
+ * (a "shakeout") and then pull back under the box — that's normal,
+ * expected VCP behavior, not a breakout, so it must not disqualify the
+ * ticker as long as price has since come back inside the box (or within
+ * tolerance). Only a CURRENT close that's still clearly above resistance
+ * counts as "the pattern has broken out and moved on."
+ */
+function isEntryMissed(run, candles) {
+  const runLow = Math.min(...run.map(w => w.pMid.value));
+  const resistance = getOriginalResistance(run);
+  const breakoutLevel = resistance * (1 + SCREENER_POST_RUN_BREAKOUT_PCT);
+
+  // Structure check: any close across the pattern's span (from its first
+  // wave onward) making a new low below the run's own lowest low means
+  // the base broke down and the setup is no longer valid.
+  const firstStartIdx = run[0].pStart.index;
+  for (let k = firstStartIdx; k < candles.length; k++) {
+    if (candles[k].low < runLow) return true;
+  }
+
+  // Current-state check: only the MOST RECENT close matters for whether
+  // the VCP is still "live" — it must sit inside the box or at most the
+  // allowed tolerance above the original resistance level.
+  const currentClose = candles[candles.length - 1].close;
+  if (currentClose > breakoutLevel) return true;
+
+  // Breakdown check: if price has since fallen back down through the
+  // LAST wave's own low (its most recent pMid), the pattern has broken
+  // down out the bottom even though that low may still be above the
+  // run's overall lowest low (which only catches breakdowns below the
+  // very first/deepest wave). A VCP is only a live setup if the most
+  // recent close is still holding above its most recent wave's low.
+  const lastWaveLow = run[run.length - 1].pMid.value;
+  if (currentClose < lastWaveLow) return true;
+
+  return false;
+}
+
+// Max number of days allowed to have elapsed between the end of a VCP box
+// (its last wave's pEnd) and the most recent candle for the ticker to
+// still be considered "fresh" by the screener. Anything older than this is
+// considered stale — the box finished too long ago — and is excluded.
+const SCREENER_MAX_DAYS_SINCE_BOX_END = 10;
+
+// Returns true if the VCP box has ended (there's at least one candle after
+// the run's last wave) AND no more than SCREENER_MAX_DAYS_SINCE_BOX_END
+// days have passed between the box's end and the most recent candle.
+function isBoxEndWithinOneWeek(run, candles) {
+  const lastEndIdx = run[run.length - 1].pEnd.index;
+  // Box must have actually ended — need at least one candle after it.
+  if (lastEndIdx >= candles.length - 1) return false;
+
+  const boxEndTime = new Date(run[run.length - 1].pEnd.time).getTime();
+  const lastCandleTime = new Date(candles[candles.length - 1].time).getTime();
+  const daysSinceBoxEnd = (lastCandleTime - boxEndTime) / (1000 * 60 * 60 * 24);
+
+  return daysSinceBoxEnd <= SCREENER_MAX_DAYS_SINCE_BOX_END;
+}
+
+function updateWaves() {
+  clearWaves();
+  if (!rawCandles || rawCandles.length === 0) return;
+
+  const show = document.getElementById('toggle-waves').checked;
+  if (!show) return;
+
+  const depth = parseInt(document.getElementById('wave-depth').value, 10);
+  const runs  = calculateWaveSegmentsMultiParam(rawCandles, depth);
+
+  // ---- Time filter + duplicate/nested-run pruning ----
+  const filteredRuns = keepBestRuns(filterRunsByLookback(runs, VCP_LOOKBACK_MONTHS));
+
+  // ---- Draw each qualifying VCP run ----
+  filteredRuns.forEach(({ data, run, breakoutIdx }) => {
+    // ---- 1. Wave curve line (shifted below candles) ----
+    const series = chart.addLineSeries({
+      color:     '#ffb300',
+      lineWidth: 3.5,
+      lineType:  LightweightCharts.LineType.Curved,
+      lineStyle: LightweightCharts.LineStyle.Solid,
+      crosshairMarkerVisible: false,
+      priceLineVisible:  false,
+      lastValueVisible:  false,
+    });
+    const shiftedData = data.map(d => ({
+      time:  d.time,
+      value: shiftValueDownByPixels(d.value, WAVE_PIXEL_OFFSET),
+    }));
+    series.setData(shiftedData);
+
+    // Valley markers
+    const markers = [];
+    run.forEach(w => {
+      markers.push({
+        time: w.pMid.time,
+        position: 'belowBar',
+        color: '#ffb300',
+        shape: 'circle',
+        size: 0,
+        text: w.pMid.value.toFixed(2),
+      });
+    });
+    series.setMarkers(markers);
+    activeWaveSeriesList.push(series);
+
+    // ---- 2. Resistance range (thin rectangle) + Box ----
+    const firstLow      = run[0].pMid.value;             // deepest point (1st wave)
+    const startTime     = run[0].pStart.time;
+    // The resistance bar / box always ends at this VCP run's own last wave —
+    // it must not extend forward into where the next VCP begins, even if a
+    // breakout candle was found further out.
+    const endTime = run[run.length - 1].pEnd.time;
+
+    // Resistance range: place the bar around the average of all wave highs
+    // so it sits inside the base instead of being tied to the 2nd wave.
+    const avgResistanceHigh = getResistanceBarLevel(run);
+    const RESISTANCE_GAP_PX   = 2;  // small clearance around the average high
+    const RESISTANCE_RANGE_PX = 8;  // thickness of the resistance band
+    const resBot = shiftValueDownByPixels(avgResistanceHigh, -RESISTANCE_GAP_PX);   // slightly above the average high
+    const resTop = shiftValueDownByPixels(resBot, -RESISTANCE_RANGE_PX);            // band's top edge
+
+    const resColor   = 'rgba(100, 181, 246, 0.85)';
+    const boxColor   = 'rgba(100, 181, 246, 0.5)';
+    const boxFaint   = 'rgba(100, 181, 246, 0.3)';
+    const baseOpts   = {
+      crosshairMarkerVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    };
+
+    // === RESISTANCE RANGE (thin rectangle at the top) ===
+
+    // Top edge of resistance range
+    const resTopLine = chart.addLineSeries({
+      ...baseOpts, color: resColor, lineWidth: 2,
+      lineStyle: LightweightCharts.LineStyle.Solid,
+    });
+    resTopLine.setData([
+      { time: startTime, value: resTop },
+      { time: endTime,   value: resTop },
+    ]);
+    activeWaveSeriesList.push(resTopLine);
+
+    // Bottom edge of resistance range (also top edge of main box)
+    const resBotLine = chart.addLineSeries({
+      ...baseOpts, color: resColor, lineWidth: 2,
+      lineStyle: LightweightCharts.LineStyle.Solid,
+    });
+    resBotLine.setData([
+      { time: startTime, value: resBot },
+      { time: endTime,   value: resBot },
+    ]);
+    activeWaveSeriesList.push(resBotLine);
+
+    // Left vertical of resistance range (straight — same time as top/bottom edges)
+    const resLv = chart.addLineSeries({
+      ...baseOpts, color: resColor, lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Solid,
+    });
+    resLv.setData([
+      { time: startTime, value: resTop },
+      { time: startTime, value: resBot },
+    ]);
+    activeWaveSeriesList.push(resLv);
+
+    // Right vertical of resistance range (straight)
+    const resRv = chart.addLineSeries({
+      ...baseOpts, color: resColor, lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Solid,
+    });
+    resRv.setData([
+      { time: endTime, value: resTop },
+      { time: endTime, value: resBot },
+    ]);
+    activeWaveSeriesList.push(resRv);
+
+    // === MAIN BOX (from resistance range bottom down to first wave low) ===
+
+    // Bottom edge - first wave low (dashed)
+    const boxBottomLine = chart.addLineSeries({
+      ...baseOpts, color: boxFaint, lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+    });
+    boxBottomLine.setData([
+      { time: startTime, value: firstLow },
+      { time: endTime,   value: firstLow },
+    ]);
+    activeWaveSeriesList.push(boxBottomLine);
+
+    // Left vertical edge of main box (straight)
+    const boxLv = chart.addLineSeries({
+      ...baseOpts, color: boxColor, lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Solid,
+    });
+    boxLv.setData([
+      { time: startTime, value: resBot },
+      { time: startTime, value: firstLow },
+    ]);
+    activeWaveSeriesList.push(boxLv);
+
+    // Right vertical edge of main box (straight)
+    const boxRv = chart.addLineSeries({
+      ...baseOpts, color: boxColor, lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Solid,
+    });
+    boxRv.setData([
+      { time: endTime, value: resBot },
+      { time: endTime, value: firstLow },
+    ]);
+    activeWaveSeriesList.push(boxRv);
+  });
+}
+
+async function loadSymbolList() {
+  try {
+    const res = await fetch(`/api/symbols?watchlist=${encodeURIComponent(selectedWatchlist)}`);
+    allSymbols = await res.json();
+    renderSymbolList(allSymbols);
+    if (allSymbols.length > 0) {
+      selectSymbol(allSymbols[0].symbol);
+    }
+  } catch (e) {
+    document.getElementById('symbol-list').innerHTML =
+      '<div style="padding:14px; color:var(--text-dim); font-size:12.5px;">Failed to load symbols.</div>';
+  }
+}
+
+function renderSymbolList(symbols) {
+  const list = document.getElementById('symbol-list');
+  list.innerHTML = '';
+  symbols.forEach(s => {
+    const row = document.createElement('div');
+    row.className = 'symbol-row' + (s.symbol === activeSymbol ? ' active' : '');
+    row.dataset.symbol = s.symbol;
+
+    const chgClass = s.change_pct > 0 ? 'up' : s.change_pct < 0 ? 'down' : 'flat';
+    const chgText = s.change_pct !== null && s.change_pct !== undefined
+      ? `${s.change_pct > 0 ? '+' : ''}${s.change_pct}%` : '—';
+    const priceText = s.last_close !== null && s.last_close !== undefined
+      ? s.last_close.toFixed(2) : '—';
+
+    row.innerHTML = `
+      <div class="left">
+        <div class="ticker">${s.symbol}</div>
+        <div class="meta">${s.row_count} bars</div>
+      </div>
+      <div class="right">
+        <div class="price">${priceText}</div>
+        <div class="chg ${chgClass}">${chgText}</div>
+      </div>
+      <button class="remove-btn" title="Remove ${s.symbol}">&times;</button>
+    `;
+    row.addEventListener('click', () => selectSymbol(s.symbol));
+    row.querySelector('.remove-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeSymbol(s.symbol);
+    });
+    list.appendChild(row);
+  });
+}
+
+async function selectSymbol(symbol) {
+  activeSymbol = symbol;
+
+  document.querySelectorAll('.symbol-row').forEach(row => {
+    row.classList.toggle('active', row.dataset.symbol === symbol);
+  });
+  document.querySelectorAll('.screener-row').forEach(row => {
+    row.classList.toggle('active', row.dataset.symbol === symbol);
+  });
+
+  document.getElementById('empty-state').style.display = 'none';
+  const statusEl = document.getElementById('status-state');
+  const chartEl = document.getElementById('chart');
+  chartEl.classList.remove('loaded');
+  statusEl.style.display = 'flex';
+  statusEl.innerHTML = '<div class="dot-spinner"><span></span><span></span><span></span></div>';
+
+  document.getElementById('symbol-title').textContent = symbol;
+  closeSuggestions();
+
+  try {
+    const res = await fetch(`/api/ohlcv/${symbol}?watchlist=${encodeURIComponent(selectedWatchlist)}`);
+    if (!res.ok) throw new Error('No data');
+    const data = await res.json();
+
+    rawCandles = data.candles;
+    candleSeries.setData(data.candles);
+    volumeSeries.setData(data.volumes);
+
+    updateWaves();
+    chartEl.classList.add('loaded');
+
+    // Force both axes back to auto-fit so a previous manual zoom/drag on
+    // either the time or price axis doesn't carry over to the new symbol
+    // (removes the need to double-click the axes to reset). Deferred to
+    // the next tick so it runs after the chart has finished processing
+    // the newly-set series data.
+    requestAnimationFrame(() => {
+      candleSeries.priceScale().applyOptions({ autoScale: true });
+      volumeSeries.priceScale().applyOptions({ autoScale: true });
+      chart.timeScale().fitContent();
+    });
+
+    statusEl.style.display = 'none';
+    updateLegend(null);
+  } catch (e) {
+    statusEl.textContent = `No data available for ${symbol}`;
+  }
+}
+
+document.getElementById('toggle-waves').addEventListener('change', updateWaves);
+
+// Uses a 100ms debounce to prevent layout calculation freezes during dragging
+document.getElementById('wave-depth').addEventListener('input', (e) => {
+  const value = e.target.value;
+  document.getElementById('depth-val').textContent = value;
+  
+  clearTimeout(waveDebounceTimeout);
+  waveDebounceTimeout = setTimeout(() => {
+    updateWaves();
+  }, 100);
+});
+
+document.getElementById('watchlist-select').addEventListener('change', (e) => {
+  selectedWatchlist = e.target.value;
+  activeSymbol = null;
+  rawCandles = [];
+  clearWaves();
+  document.getElementById('symbol-title').textContent = 'Select a stock';
+  document.getElementById('legend').innerHTML = '';
+  document.getElementById('status-state').style.display = 'none';
+  document.getElementById('empty-state').style.display = 'flex';
+  // Clear any stale screener results from the previous watchlist.
+  document.getElementById('screener-results').innerHTML = '';
+  document.getElementById('screener-status').textContent = '';
+  loadSymbolList();
+});
+
+function setAddTickerStatus(text, kind) {
+  const el = document.getElementById('add-ticker-status');
+  el.textContent = text;
+  el.className = 'add-ticker-status' + (kind ? ' ' + kind : '');
+}
+
+async function addSymbol() {
+  const input = document.getElementById('add-ticker-input');
+  const btn = document.getElementById('add-ticker-btn');
+  const symbol = input.value.trim().toUpperCase();
+
+  if (!symbol) {
+    setAddTickerStatus('Enter a ticker symbol', 'error');
+    return;
+  }
+  if (allSymbols.some(s => s.symbol === symbol)) {
+    setAddTickerStatus(`${symbol} is already in the watchlist`, 'error');
+    return;
+  }
+
+  btn.disabled = true;
+  setAddTickerStatus(`Fetching ${symbol}...`, 'loading');
+
+  try {
+    const res = await fetch('/api/watchlist/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, watchlist: selectedWatchlist }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || data.status !== 'success') {
+      setAddTickerStatus(data.message || `Failed to add ${symbol}`, 'error');
+      return;
+    }
+
+    setAddTickerStatus(data.message, 'success');
+    input.value = '';
+    await loadSymbolList();
+    selectSymbol(symbol);
+  } catch (e) {
+    setAddTickerStatus(`Network error while adding ${symbol}`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function removeSymbol(symbol) {
+  if (!confirm(`Remove ${symbol} from the watchlist? This deletes its stored price data.`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/watchlist/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, watchlist: selectedWatchlist }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || data.status !== 'success') {
+      setAddTickerStatus(data.message || `Failed to remove ${symbol}`, 'error');
+      return;
+    }
+
+    setAddTickerStatus(data.message, 'success');
+
+    if (activeSymbol === symbol) {
+      activeSymbol = null;
+      rawCandles = [];
+      clearWaves();
+      candleSeries.setData([]);
+      volumeSeries.setData([]);
+      document.getElementById('symbol-title').textContent = 'Select a stock';
+      document.getElementById('legend').innerHTML = '';
+      document.getElementById('empty-state').style.display = 'flex';
+    }
+
+    await loadSymbolList();
+  } catch (e) {
+    setAddTickerStatus(`Network error while removing ${symbol}`, 'error');
+  }
+}
+
+document.getElementById('add-ticker-btn').addEventListener('click', addSymbol);
+document.getElementById('add-ticker-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') addSymbol();
+});
+
+// =====================================================================
+// SEARCH AUTOCOMPLETE / SUGGESTIONS
+// =====================================================================
+const searchInput = document.getElementById('search');
+const suggestionsEl = document.getElementById('search-suggestions');
+let suggestionMatches = [];
+let highlightedIndex = -1;
+
+function escapeHtml(str) {
+  return str.replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+function highlightMatch(symbol, q) {
+  const idx = symbol.indexOf(q);
+  if (idx === -1 || !q) return escapeHtml(symbol);
+  return escapeHtml(symbol.slice(0, idx)) + '<mark>' + escapeHtml(symbol.slice(idx, idx + q.length)) + '</mark>' + escapeHtml(symbol.slice(idx + q.length));
+}
+
+function closeSuggestions() {
+  suggestionsEl.classList.remove('open');
+  suggestionsEl.innerHTML = '';
+  suggestionMatches = [];
+  highlightedIndex = -1;
+}
+
+function renderSuggestions(q) {
+  if (!q) { closeSuggestions(); return; }
+
+  suggestionMatches = allSymbols.filter(s => s.symbol.includes(q)).slice(0, 8);
+  highlightedIndex = -1;
+
+  if (suggestionMatches.length === 0) {
+    suggestionsEl.innerHTML = `<div class="suggestion-empty">No symbols match "${escapeHtml(q)}"</div>`;
+    suggestionsEl.classList.add('open');
+    return;
+  }
+
+  suggestionsEl.innerHTML = suggestionMatches.map((s, i) => {
+    const priceText = s.last_close !== null && s.last_close !== undefined ? s.last_close.toFixed(2) : '—';
+    return `<div class="suggestion-item" data-index="${i}" data-symbol="${escapeHtml(s.symbol)}">
+      <span class="s-ticker">${highlightMatch(s.symbol, q)}</span>
+      <span class="s-price">${priceText}</span>
+    </div>`;
+  }).join('');
+  suggestionsEl.classList.add('open');
+
+  suggestionsEl.querySelectorAll('.suggestion-item').forEach(el => {
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // keep focus behavior predictable, fire before blur
+      chooseSuggestion(el.dataset.symbol);
+    });
+    el.addEventListener('mouseenter', () => {
+      highlightedIndex = parseInt(el.dataset.index, 10);
+      updateHighlighted();
+    });
+  });
+}
+
+function updateHighlighted() {
+  suggestionsEl.querySelectorAll('.suggestion-item').forEach(el => {
+    el.classList.toggle('highlighted', parseInt(el.dataset.index, 10) === highlightedIndex);
+  });
+  const active = suggestionsEl.querySelector('.suggestion-item.highlighted');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+function chooseSuggestion(symbol) {
+  searchInput.value = symbol;
+  closeSuggestions();
+  renderSymbolList(allSymbols.filter(s => s.symbol.includes(symbol)));
+  if (allSymbols.some(s => s.symbol === symbol)) {
+    selectSymbol(symbol);
+  }
+}
+
+searchInput.addEventListener('input', (e) => {
+  const q = e.target.value.trim().toUpperCase();
+  const filtered = q ? allSymbols.filter(s => s.symbol.includes(q)) : allSymbols;
+  renderSymbolList(filtered);
+  renderSuggestions(q);
+});
+
+searchInput.addEventListener('focus', (e) => {
+  const q = e.target.value.trim().toUpperCase();
+  if (q) renderSuggestions(q);
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  if (!suggestionsEl.classList.contains('open') || suggestionMatches.length === 0) return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    highlightedIndex = Math.min(highlightedIndex + 1, suggestionMatches.length - 1);
+    updateHighlighted();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    highlightedIndex = Math.max(highlightedIndex - 1, 0);
+    updateHighlighted();
+  } else if (e.key === 'Enter') {
+    if (highlightedIndex >= 0 && suggestionMatches[highlightedIndex]) {
+      e.preventDefault();
+      chooseSuggestion(suggestionMatches[highlightedIndex].symbol);
+    }
+  } else if (e.key === 'Escape') {
+    closeSuggestions();
+  }
+});
+
+searchInput.addEventListener('blur', () => {
+  // Delay so a mousedown on a suggestion item registers first.
+  setTimeout(closeSuggestions, 100);
+});
+
+function switchTab(tabName) {
+  document.getElementById('tab-btn-watchlist').classList.toggle('active', tabName === 'watchlist');
+  document.getElementById('tab-btn-screener').classList.toggle('active', tabName === 'screener');
+  document.getElementById('watchlist-panel').classList.toggle('active', tabName === 'watchlist');
+  document.getElementById('screener-panel').classList.toggle('active', tabName === 'screener');
+}
+document.getElementById('tab-btn-watchlist').addEventListener('click', () => switchTab('watchlist'));
+document.getElementById('tab-btn-screener').addEventListener('click', () => switchTab('screener'));
+document.getElementById('screener-lookback-label').textContent = SCREENER_LOOKBACK_MONTHS;
+
+// Bumped on every new scan so a stale in-flight scan can detect it's been
+// superseded and stop writing to the UI.
+let screenerRunToken = 0;
+
+/**
+ * Scans every symbol in the watchlist across SCREENER_SENSITIVITIES,
+ * keeping any symbol that has at least one VCP run whose first wave
+ * started within SCREENER_LOOKBACK_MONTHS. Duplicates across sensitivities
+ * are allowed by design — the same symbol can appear under multiple
+ * sensitivity groups.
+ */
+async function runScreener() {
+  const btn       = document.getElementById('run-screener-btn');
+  const statusEl  = document.getElementById('screener-status');
+  const resultsEl = document.getElementById('screener-results');
+
+  if (!allSymbols || allSymbols.length === 0) {
+    statusEl.textContent = 'No symbols loaded yet.';
+    return;
+  }
+
+  const myToken = ++screenerRunToken;
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+  resultsEl.innerHTML = '';
+
+  const results = {};
+  SCREENER_SENSITIVITIES.forEach(depth => { results[depth] = []; });
+
+  const symbols = allSymbols.map(s => s.symbol);
+  const total = symbols.length;
+  let done = 0;
+  let cursor = 0;
+
+  statusEl.innerHTML = `<span class="spinner"></span>Scanning 0 / ${total}...`;
+
+  async function worker() {
+    while (cursor < symbols.length) {
+      const symbol = symbols[cursor++];
+      try {
+        const res = await fetch(`/api/ohlcv/${symbol}?watchlist=${encodeURIComponent(selectedWatchlist)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const candles = data.candles;
+          if (candles && candles.length > 0) {
+            const lastClose = candles[candles.length - 1].close;
+            // Scan all target sensitivities for this symbol in one pass.
+            SCREENER_SENSITIVITIES.forEach(depth => {
+              const runs     = calculateWaveSegmentsMultiParam(candles, depth);
+              const filtered = keepBestRuns(filterRunsByLookback(runs, SCREENER_LOOKBACK_MONTHS));
+              if (filtered.length === 0) return;
+
+              // A symbol can have more than one VCP run inside the lookback
+              // window (an old one and a fresher one). Only the MOST RECENT
+              // run reflects the stock's current state, so that's the only
+              // one we judge for the "already broken out" check — otherwise
+              // an old, already-extended run could let the symbol slip
+              // through just because some earlier run still looked tight.
+              const mostRecent = filtered[filtered.length - 1].run;
+
+              if (!isEntryMissed(mostRecent, candles) && isBoxEndWithinOneWeek(mostRecent, candles)) {
+                results[depth].push({ symbol, lastClose });
+              }
+            });
+          }
+        }
+      } catch (e) {
+        // Skip symbols that fail to fetch/parse and keep scanning.
+      }
+
+      done++;
+      if (myToken === screenerRunToken) {
+        statusEl.innerHTML = `<span class="spinner"></span>Scanning ${done} / ${total}...`;
+      }
+    }
+  }
+
+  const workers = [];
+  for (let w = 0; w < SCREENER_CONCURRENCY; w++) workers.push(worker());
+  await Promise.all(workers);
+
+  if (myToken !== screenerRunToken) return; // a newer scan started; drop this one
+
+  renderScreenerResults(results);
+  statusEl.textContent = `Done — scanned ${total} symbols.`;
+  btn.disabled = false;
+  btn.textContent = 'Run Scan';
+}
+
+function renderScreenerResults(results) {
+  const resultsEl = document.getElementById('screener-results');
+  resultsEl.innerHTML = '';
+
+  SCREENER_SENSITIVITIES.forEach(depth => {
+    const group = document.createElement('div');
+    group.className = 'sensi-group';
+
+    const header = document.createElement('div');
+    header.className = 'sensi-group-header';
+    header.innerHTML = `<span class="label">Sensi ${depth}</span><span class="count">${results[depth].length}</span>`;
+    group.appendChild(header);
+
+    if (results[depth].length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'sensi-group-empty';
+      empty.textContent = 'No VCPs found';
+      group.appendChild(empty);
+    } else {
+      results[depth].forEach(({ symbol, lastClose }) => {
+        const row = document.createElement('div');
+        row.className = 'screener-row' + (symbol === activeSymbol ? ' active' : '');
+        row.dataset.symbol = symbol;
+        row.innerHTML = `
+          <span class="ticker">${symbol}</span>
+          <span class="price">${lastClose != null ? lastClose.toFixed(2) : ''}</span>
+        `;
+        row.addEventListener('click', () => {
+          document.getElementById('wave-depth').value = depth;
+          document.getElementById('depth-val').textContent = depth;
+          selectSymbol(symbol);
+        });
+        group.appendChild(row);
+      });
+    }
+
+    resultsEl.appendChild(group);
+  });
+}
+
+document.getElementById('run-screener-btn').addEventListener('click', runScreener);
+
+initChart();
+loadSymbolList();
+</script>
+</body>
+</html>

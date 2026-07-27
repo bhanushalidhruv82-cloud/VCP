@@ -1,0 +1,15 @@
+# Logs
+*.log
+
+# Dependencies
+node_modules/
+jspm_packages/
+
+# Environment variables
+.env
+.env.local
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.suo
