@@ -53,6 +53,9 @@ def get_connection(db_name=None):
 def index():
     return send_from_directory(app.static_folder, "templates/index7.html")
 
+@app.route("/health")
+def health():
+    return {"status": "ok"}, 200
 
 @app.route("/api/symbols")
 def api_symbols():
