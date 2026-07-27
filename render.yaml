@@ -1,11 +1,14 @@
 services:
   # ------------------------------------------------------------------
-  # Web app (dashboard + API)
+  # Web app (dashboard + API) — runs on Render's free plan.
+  # The daily data update no longer runs here — see
+  # .github/workflows/daily-update.yml, which runs on GitHub Actions
+  # for free instead of Render's paid Cron Job.
   # ------------------------------------------------------------------
   - type: web
     name: stock-dashboard
     env: python
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
     envVars:
@@ -21,25 +24,3 @@ services:
         sync: false
       - key: FLASK_DEBUG
         value: "false"
-
-  # ------------------------------------------------------------------
-  # Daily incremental data-update job (runs once a day, both watchlists)
-  # ------------------------------------------------------------------
-  - type: cron
-    name: daily-stock-update
-    env: python
-    plan: starter
-    schedule: "30 23 * * *"   # 23:30 UTC = 05:00 IST, after US market close
-    buildCommand: pip install -r requirements.txt
-    startCommand: python daily_update.py
-    envVars:
-      - key: DB_HOST
-        sync: false
-      - key: DB_PORT
-        sync: false
-      - key: DB_NAME
-        sync: false
-      - key: DB_USER
-        sync: false
-      - key: DB_PASSWORD
-        sync: false
