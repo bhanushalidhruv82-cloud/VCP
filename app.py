@@ -42,10 +42,20 @@ def resolve_tables(watchlist_param):
     return WATCHLIST_TABLE_MAP.get(watchlist_param, WATCHLIST_TABLE_MAP[DEFAULT_WATCHLIST])
 
 
+# def get_connection(db_name=None):
+#     return psycopg2.connect(
+#         host=DB_HOST, port=DB_PORT, dbname=(db_name or DB_NAME),
+#         user=DB_USER, password=DB_PASSWORD
+#     )
 def get_connection(db_name=None):
     return psycopg2.connect(
-        host=DB_HOST, port=DB_PORT, dbname=(db_name or DB_NAME),
-        user=DB_USER, password=DB_PASSWORD
+        host=DB_HOST,
+        port=DB_PORT,
+        dbname=(db_name or DB_NAME),
+        user=DB_USER,
+        password=DB_PASSWORD,
+        sslmode=os.environ.get("DB_SSLMODE", "require"),
+        connect_timeout=10,
     )
 
 
@@ -179,6 +189,40 @@ def store_ohlcv_rows(cur, ohlcv_table, symbol_id, df):
     )
 
 
+# @app.route("/api/watchlist/add", methods=["POST"])
+# def api_watchlist_add():
+#     data = request.json or {}
+#     symbol = (data.get("symbol") or "").strip().upper()
+#     watchlist = data.get("watchlist", DEFAULT_WATCHLIST)
+
+#     if not symbol:
+#         return jsonify({"status": "error", "message": "Ticker symbol is required"}), 400
+
+#     tables = resolve_tables(watchlist)
+#     symbols_table, ohlcv_table = tables["symbols"], tables["ohlcv"]
+#     conn = get_connection()
+#     try:
+#         df = fetch_ohlcv_history(symbol)
+#         if df is None or df.empty:
+#             return jsonify({"status": "error", "message": f"No data found for '{symbol}'. Check the ticker symbol."}), 404
+
+#         with conn.cursor() as cur:
+#             symbol_id = get_or_create_symbol_id(cur, symbols_table, symbol)
+#             store_ohlcv_rows(cur, ohlcv_table, symbol_id, df)
+#         conn.commit()
+
+#         return jsonify({
+#             "status": "success",
+#             "message": f"Added {symbol} ({len(df)} rows fetched).",
+#             "symbol": symbol,
+#             "rows": len(df),
+#         })
+#     except Exception as e:
+#         conn.rollback()
+#         return jsonify({"status": "error", "message": f"Failed to fetch/store {symbol}: {str(e)}"}), 500
+#     finally:
+#         conn.close()
+
 @app.route("/api/watchlist/add", methods=["POST"])
 def api_watchlist_add():
     data = request.json or {}
@@ -190,28 +234,41 @@ def api_watchlist_add():
 
     tables = resolve_tables(watchlist)
     symbols_table, ohlcv_table = tables["symbols"], tables["ohlcv"]
-    conn = get_connection()
+
+    conn = None
     try:
+        conn = get_connection()
+
         df = fetch_ohlcv_history(symbol)
         if df is None or df.empty:
-            return jsonify({"status": "error", "message": f"No data found for '{symbol}'. Check the ticker symbol."}), 404
+            return jsonify({
+                "status": "error",
+                "message": f"No data found for '{symbol}'. Check the ticker symbol."
+            }), 404
 
         with conn.cursor() as cur:
             symbol_id = get_or_create_symbol_id(cur, symbols_table, symbol)
             store_ohlcv_rows(cur, ohlcv_table, symbol_id, df)
-        conn.commit()
 
+        conn.commit()
         return jsonify({
             "status": "success",
             "message": f"Added {symbol} ({len(df)} rows fetched).",
             "symbol": symbol,
             "rows": len(df),
         })
+
     except Exception as e:
-        conn.rollback()
-        return jsonify({"status": "error", "message": f"Failed to fetch/store {symbol}: {str(e)}"}), 500
+        if conn:
+            conn.rollback()
+        app.logger.exception("Failed to add symbol %s", symbol)
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to fetch/store {symbol}: {str(e)}"
+        }), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 @app.route("/api/watchlist/remove", methods=["POST"])
