@@ -234,41 +234,29 @@ def api_watchlist_add():
 
     tables = resolve_tables(watchlist)
     symbols_table, ohlcv_table = tables["symbols"], tables["ohlcv"]
-
-    conn = None
+    conn = get_connection()
     try:
-        conn = get_connection()
-
         df = fetch_ohlcv_history(symbol)
         if df is None or df.empty:
-            return jsonify({
-                "status": "error",
-                "message": f"No data found for '{symbol}'. Check the ticker symbol."
-            }), 404
+            return jsonify({"status": "error", "message": f"No data found for '{symbol}'. Check the ticker symbol."}), 404
 
         with conn.cursor() as cur:
             symbol_id = get_or_create_symbol_id(cur, symbols_table, symbol)
             store_ohlcv_rows(cur, ohlcv_table, symbol_id, df)
-
         conn.commit()
+
         return jsonify({
             "status": "success",
             "message": f"Added {symbol} ({len(df)} rows fetched).",
             "symbol": symbol,
             "rows": len(df),
         })
-
     except Exception as e:
-        if conn:
-            conn.rollback()
-        app.logger.exception("Failed to add symbol %s", symbol)
-        return jsonify({
-            "status": "error",
-            "message": f"Failed to fetch/store {symbol}: {str(e)}"
-        }), 500
+        conn.rollback()
+        return jsonify({"status": "error", "message": f"Failed to fetch/store {symbol}: {str(e)}"}), 500
     finally:
-        if conn:
-            conn.close()
+        conn.close()
+
 
 
 @app.route("/api/watchlist/remove", methods=["POST"])
