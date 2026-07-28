@@ -842,7 +842,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import Flask, jsonify, send_from_directory, request
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, execute_values
 import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
@@ -1111,10 +1111,15 @@ def store_ohlcv_rows(cur, ohlcv_table, symbol_id, df):
         )
         for _, row in df.iterrows()
     ]
-    cur.executemany(
+    # execute_values batches all rows into a single INSERT statement (one
+    # round-trip to the DB) instead of executemany's one-statement-per-row
+    # approach, which for a multi-year history (1000+ rows) was slow enough
+    # over a network connection to blow past gunicorn's 120s worker timeout.
+    execute_values(
+        cur,
         f"""
         INSERT INTO {ohlcv_table} (symbol_id, date, open, high, low, close, volume)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        VALUES %s
         ON CONFLICT (symbol_id, date) DO UPDATE SET
             open = EXCLUDED.open,
             high = EXCLUDED.high,
@@ -1123,6 +1128,7 @@ def store_ohlcv_rows(cur, ohlcv_table, symbol_id, df):
             volume = EXCLUDED.volume;
         """,
         rows,
+        page_size=1000,
     )
 
 
