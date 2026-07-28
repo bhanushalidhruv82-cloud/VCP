@@ -153,12 +153,47 @@ def get_or_create_symbol_id(cur, symbols_table, symbol):
     return cur.fetchone()[0]
 
 
+# def fetch_ohlcv_history(symbol):
+#     df = yf.download(symbol, start="2020-01-01", progress=False, auto_adjust=False)
+#     if isinstance(df.columns, pd.MultiIndex):
+#         df.columns = df.columns.droplevel(1)
+#     df = df.reset_index()
+#     return df
 def fetch_ohlcv_history(symbol):
-    df = yf.download(symbol, start="2020-01-01", progress=False, auto_adjust=False)
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.droplevel(1)
-    df = df.reset_index()
-    return df
+    symbol = (symbol or "").strip().upper()
+
+    last_err = None
+    attempts = [
+        {"start": "2020-01-01"},
+        {"period": "max"},
+    ]
+
+    for params in attempts:
+        try:
+            df = yf.download(
+                symbol,
+                progress=False,
+                auto_adjust=False,
+                threads=False,
+                timeout=30,
+                **params,
+            )
+
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.droplevel(1)
+
+            df = df.reset_index()
+            print(f"[yfinance] {symbol} params={params} rows={len(df)} cols={list(df.columns)}")
+
+            if not df.empty:
+                return df
+
+        except Exception as e:
+            last_err = e
+            print(f"[yfinance] {symbol} failed with {params}: {e}")
+
+    print(f"[yfinance] {symbol} returned no data. Last error: {last_err}")
+    return pd.DataFrame()
 
 
 def store_ohlcv_rows(cur, ohlcv_table, symbol_id, df):
@@ -234,28 +269,45 @@ def api_watchlist_add():
 
     tables = resolve_tables(watchlist)
     symbols_table, ohlcv_table = tables["symbols"], tables["ohlcv"]
-    conn = get_connection()
+
+    conn = None
     try:
+        conn = get_connection()
+
         df = fetch_ohlcv_history(symbol)
-        if df is None or df.empty:
-            return jsonify({"status": "error", "message": f"No data found for '{symbol}'. Check the ticker symbol."}), 404
+        if df is None:
+            return jsonify({
+                "status": "error",
+                "message": f"Failed to fetch '{symbol}' from yfinance. Check Render logs."
+            }), 502
+
+        if df.empty:
+            return jsonify({
+                "status": "error",
+                "message": f"No data found for '{symbol}'. Check the ticker symbol."
+            }), 404
 
         with conn.cursor() as cur:
             symbol_id = get_or_create_symbol_id(cur, symbols_table, symbol)
             store_ohlcv_rows(cur, ohlcv_table, symbol_id, df)
-        conn.commit()
 
+        conn.commit()
         return jsonify({
             "status": "success",
             "message": f"Added {symbol} ({len(df)} rows fetched).",
             "symbol": symbol,
             "rows": len(df),
         })
+
     except Exception as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
+        app.logger.exception("Failed to add symbol %s", symbol)
         return jsonify({"status": "error", "message": f"Failed to fetch/store {symbol}: {str(e)}"}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
+
 
 
 
