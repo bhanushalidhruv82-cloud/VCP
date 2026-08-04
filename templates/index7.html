@@ -2565,15 +2565,23 @@ function isEntryMissed(run, candles) {
 // (its last wave's pEnd) and the most recent candle for the ticker to
 // still be considered "fresh" by the screener. Anything older than this is
 // considered stale — the box finished too long ago — and is excluded.
-const SCREENER_MAX_DAYS_SINCE_BOX_END = 10;
+const SCREENER_MAX_DAYS_SINCE_BOX_END = 15;
 
 // Returns true if the VCP box has ended (there's at least one candle after
 // the run's last wave) AND no more than SCREENER_MAX_DAYS_SINCE_BOX_END
 // days have passed between the box's end and the most recent candle.
 function isBoxEndWithinOneWeek(run, candles) {
   const lastEndIdx = run[run.length - 1].pEnd.index;
-  // Box must have actually ended — need at least one candle after it.
-  if (lastEndIdx >= candles.length - 1) return false;
+
+  // PATCHED: previously this hard-required at least one candle AFTER the
+  // box's last pivot (lastEndIdx >= candles.length - 1 => false). That
+  // meant a pattern that was STILL ACTIVE right up to today's candle -
+  // exactly what a live, still-resolving VCP looks like - was unconditionally
+  // rejected. Combined with the tight breakout-tolerance filter, this was
+  // the main reason scans were returning 0 results across every symbol.
+  // A box whose last pivot IS the most recent candle is still "fresh" by
+  // definition (0 days elapsed), so it should pass, not fail.
+  if (lastEndIdx >= candles.length - 1) return true;
 
   const boxEndTime = new Date(run[run.length - 1].pEnd.time).getTime();
   const lastCandleTime = new Date(candles[candles.length - 1].time).getTime();
@@ -2859,6 +2867,18 @@ document.getElementById('watchlist-select').addEventListener('change', (e) => {
   // Clear any stale screener results from the previous watchlist.
   document.getElementById('screener-results').innerHTML = '';
   document.getElementById('screener-status').textContent = '';
+  // PATCHED: invalidate any screener scan still in flight for the OLD
+  // watchlist. Without this, a scan started on Watchlist1 that hadn't
+  // finished yet would keep running in the background, its remaining
+  // chunk requests would pick up the NEW selectedWatchlist value (since
+  // it's a live global read at fetch time, not a snapshot), and it would
+  // still be allowed to render its results on top of the new watchlist's
+  // screener tab once it finished - showing symbols that don't belong to
+  // the currently selected watchlist at all.
+  screenerRunToken++;
+  const btn = document.getElementById('run-screener-btn');
+  btn.disabled = false;
+  btn.textContent = 'Run Scan';
   loadSymbolList();
 });
 
@@ -3096,6 +3116,13 @@ async function runScreener() {
   }
 
   const myToken = ++screenerRunToken;
+  // PATCHED: snapshot the watchlist for THIS scan. Previously fetchChunk()
+  // read the shared global `selectedWatchlist` live at request time, so if
+  // the user switched the watchlist dropdown while a scan was still
+  // in-flight, the remaining chunk requests silently started querying the
+  // NEW watchlist's tables using the OLD watchlist's symbol list -
+  // producing results that mixed symbols/data from both watchlists.
+  const scanWatchlist = selectedWatchlist;
   btn.disabled = true;
   btn.textContent = 'Scanning...';
   resultsEl.innerHTML = '';
@@ -3115,18 +3142,50 @@ async function runScreener() {
   // the 502 restarts during a full scan).
   const CHUNK_SIZE = 60;
   const CHUNK_CONCURRENCY = 3;
+  // A chunk can fail transiently — most commonly a Render free-tier cold
+  // start (service asleep, first request wakes it up but errors/times out
+  // while it's coming up) or a brief DB hiccup. Retrying with backoff lets
+  // the scan ride that out instead of silently dropping those symbols,
+  // which is what previously caused "0 results" on one run and full
+  // results on the very next run with no visible reason why.
+  const MAX_CHUNK_RETRIES = 3;
+  const CHUNK_RETRY_BASE_DELAY_MS = 1500; // 1.5s, 3s, 6s
+
   const chunks = [];
   for (let i = 0; i < symbols.length; i += CHUNK_SIZE) {
     chunks.push(symbols.slice(i, i + CHUNK_SIZE));
   }
+
+  let failedSymbolCount = 0; // surfaced in the final status line
+
+  // Diagnostic funnel: counts how many (symbol, sensitivity) pairs survive
+  // each stage of filtering. If a future scan comes back with 0 results
+  // again, check console.table(debugCounters) at the end of the scan to
+  // see WHERE they got filtered out, instead of re-deriving it by hand:
+  //   rawRuns=0        -> wave detection itself found nothing (data issue,
+  //                        or genuinely no contraction patterns exist)
+  //   afterLookback=0  -> patterns exist but none started within
+  //                        SCREENER_LOOKBACK_MONTHS
+  //   afterEntryCheck=0-> patterns exist and are recent, but isEntryMissed()
+  //                        is rejecting all of them (structure broke down,
+  //                        or price is outside the tolerance band)
+  //   afterFreshness=0 -> passed isEntryMissed but isBoxEndWithinOneWeek()
+  //                        rejected them (box too stale)
+  const debugCounters = {};
+  SCREENER_SENSITIVITIES.forEach(depth => {
+    debugCounters[depth] = { rawRuns: 0, afterLookback: 0, afterEntryCheck: 0, afterFreshness: 0 };
+  });
 
   function processCandles(symbol, candles) {
     if (!candles || candles.length === 0) return;
     const lastClose = candles[candles.length - 1].close;
     SCREENER_SENSITIVITIES.forEach(depth => {
       const runs     = calculateWaveSegmentsMultiParam(candles, depth);
+      if (runs.length > 0) debugCounters[depth].rawRuns++;
+
       const filtered = keepBestRuns(filterRunsByLookback(runs, SCREENER_LOOKBACK_MONTHS));
       if (filtered.length === 0) return;
+      debugCounters[depth].afterLookback++;
 
       // A symbol can have more than one VCP run inside the lookback
       // window (an old one and a fresher one). Only the MOST RECENT
@@ -3136,10 +3195,29 @@ async function runScreener() {
       // through just because some earlier run still looked tight.
       const mostRecent = filtered[filtered.length - 1].run;
 
-      if (!isEntryMissed(mostRecent, candles) && isBoxEndWithinOneWeek(mostRecent, candles)) {
-        results[depth].push({ symbol, lastClose });
-      }
+      if (isEntryMissed(mostRecent, candles)) return;
+      debugCounters[depth].afterEntryCheck++;
+
+      if (!isBoxEndWithinOneWeek(mostRecent, candles)) return;
+      debugCounters[depth].afterFreshness++;
+
+      results[depth].push({ symbol, lastClose });
     });
+  }
+
+  async function fetchChunk(chunk, attempt) {
+    const res = await fetch('/api/ohlcv/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols: chunk, watchlist: scanWatchlist }), // PATCHED: use snapshot, not live global
+    });
+    if (!res.ok) {
+      // Surface the real cause instead of swallowing it — a 502/504 (cold
+      // start / gateway timeout) looks very different from a 500 (DB/app
+      // error), and that distinction is what tells you what to fix.
+      throw new Error(`HTTP ${res.status} for chunk of ${chunk.length} symbols (attempt ${attempt})`);
+    }
+    return res.json();
   }
 
   statusEl.innerHTML = `<span class="spinner"></span>Scanning 0 / ${total}...`;
@@ -3148,27 +3226,38 @@ async function runScreener() {
   async function chunkWorker() {
     while (chunkCursor < chunks.length) {
       const chunk = chunks[chunkCursor++];
-      try {
-        const res = await fetch('/api/ohlcv/batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbols: chunk, watchlist: selectedWatchlist }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          chunk.forEach(symbol => {
-            const entry = data[symbol];
-            if (entry) processCandles(symbol, entry.candles);
-          });
+      let data = null;
+
+      for (let attempt = 1; attempt <= MAX_CHUNK_RETRIES; attempt++) {
+        try {
+          data = await fetchChunk(chunk, attempt);
+          break; // success
+        } catch (e) {
+          console.error(`[screener] chunk fetch failed (attempt ${attempt}/${MAX_CHUNK_RETRIES}):`, e.message);
+          if (attempt < MAX_CHUNK_RETRIES) {
+            const wait = CHUNK_RETRY_BASE_DELAY_MS * attempt;
+            await new Promise(r => setTimeout(r, wait));
+          }
         }
-      } catch (e) {
-        // Skip this chunk on network failure and keep scanning the rest.
+      }
+
+      if (data) {
+        chunk.forEach(symbol => {
+          const entry = data[symbol];
+          if (entry) processCandles(symbol, entry.candles);
+        });
+      } else {
+        // All retries exhausted — this is now VISIBLE instead of silently
+        // producing an incomplete/empty-looking result set.
+        failedSymbolCount += chunk.length;
+        console.error(`[screener] giving up on chunk after ${MAX_CHUNK_RETRIES} attempts:`, chunk);
       }
 
       done += chunk.length;
       if (myToken === screenerRunToken) {
         const shown = Math.min(done, total);
-        statusEl.innerHTML = `<span class="spinner"></span>Scanning ${shown} / ${total}...`;
+        const failNote = failedSymbolCount > 0 ? ` (${failedSymbolCount} failed)` : '';
+        statusEl.innerHTML = `<span class="spinner"></span>Scanning ${shown} / ${total}...${failNote}`;
       }
     }
   }
@@ -3180,9 +3269,17 @@ async function runScreener() {
   if (myToken !== screenerRunToken) return; // a newer scan started; drop this one
 
   renderScreenerResults(results);
-  statusEl.textContent = `Done — scanned ${total} symbols.`;
+  statusEl.textContent = failedSymbolCount > 0
+    ? `Done — scanned ${total - failedSymbolCount}/${total} symbols. ${failedSymbolCount} failed after retries — results may be incomplete, try running again.`
+    : `Done — scanned ${total} symbols.`;
   btn.disabled = false;
   btn.textContent = 'Run Scan';
+
+  // Always logged, not just on 0-result runs — cheap, and having the
+  // history in the console makes it trivial to compare a "good" scan
+  // against a "bad" one later instead of only debugging after the fact.
+  console.log('[screener] filter funnel (per sensitivity, symbol counts):');
+  console.table(debugCounters);
 }
 
 function renderScreenerResults(results) {
